@@ -1,0 +1,37 @@
+aws eks update-kubeconfig --name eks-lab --region us-east-1 --alias eks-lab-personal
+
+
+
+
+
+
+export KARPENTER_NAMESPACE="kube-system"
+export KARPENTER_VERSION="1.12.1"
+export K8S_VERSION="1.35"
+export AWS_PARTITION="aws"
+export CLUSTER_NAME="eks-lab"
+export AWS_DEFAULT_REGION="us-east-1"
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export TEMPOUT="$(mktemp)"
+export ALIAS_VERSION="$(aws ssm get-parameter --name "/aws/service/eks/optimized-ami/$K8S_VERSION/amazon-linux-2023/x86_64/standard/recommended/image_id" --query Parameter.Value | xargs aws ec2 describe-images --query 'Images[0].Name' --image-ids --region $AWS_DEFAULT_REGION | sed -r 's/^.*(v[[:digit:]]+).*$/\1/')"
+
+
+
+
+echo "$KARPENTER_NAMESPACE" "$KARPENTER_VERSION" "$K8S_VERSION" "$CLUSTER_NAME" "$AWS_DEFAULT_REGION" "$AWS_ACCOUNT_ID" "$TEMPOUT" "$ALIAS_VERSION"
+
+
+
+kubectl delete crd ec2nodeclasses.karpenter.k8s.aws nodepools.karpenter.sh nodeclaims.karpenter.sh nodeoverlays.karpenter.sh
+
+helm install karpenter oci://public.ecr.aws/karpenter/karpenter \
+    --version $KARPENTER_VERSION \
+    -n $KARPENTER_NAMESPACE \
+    -f values.yaml
+
+
+
+helm upgrade --install karpenter-crd oci://public.ecr.aws/karpenter/karpenter-crd \
+    --version $KARPENTER_VERSION \
+    --namespace $KARPENTER_NAMESPACE \
+    --create-namespace

@@ -1,0 +1,104 @@
+
+---
+# Node Classes enable configuration of AWS specific settings
+# Multiple NodePools may point to the same EC2NodeClass
+apiVersion: karpenter.k8s.aws/v1   # AWS-specific Karpenter API group - this is where EC2NodeClass lives (the cloud/AWS half of node config)
+kind: EC2NodeClass                 # Defines HOW a node is built on AWS: AMI, IAM role, subnets, security groups, tags
+
+metadata:
+  name: node-class-priority        # Referenced by name from the NodePool's nodeClassRef further down
+
+spec:
+  amiFamily: AL2023                 # Base OS family for the node - Amazon Linux 2023
+  amiSelectorTerms:
+  - alias: al2023@latest            # Always use the latest EKS-optimized AL2023 AMI Karpenter knows about (auto-updates on each new node launch)
+
+  role: "KarpenterNodeRole-eks-lab"  # IAM role NAME (not ARN) put into the instance profile attached to every node from this class - must match node_iam_role_name in karpenter.tf
+
+  metadataOptions:
+    httpEndpoint: enabled            # Instance Metadata Service (IMDS) is reachable at all from inside the instance
+    httpProtocolIPv6: disabled       # No IPv6 IMDS endpoint (cluster/VPC here doesn't use IPv6)
+    httpPutResponseHopLimit: 2       # IMDSv2 token requests can only travel 2 network hops - limits how far a stolen token could be relayed (e.g. out of a container)
+    httpTokens: required             # Enforces IMDSv2 (token-based) - plain unauthenticated IMDSv1 GET requests are rejected, closing a common SSRF/credential-theft path
+
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-lab   # Only launch nodes into subnets carrying this tag (tagged on the VPC's subnets by the VPC/EKS Terraform)
+
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-lab   # Only attach security groups carrying this same discovery tag to new nodes
+
+  tags:
+    karpenter.sh/discovery: eks-lab        # Tag applied to the EC2 instances themselves - needed for SG discovery on the node's own ENI, plus cost tracking
+    Name: eks-lab-karpenter-priority         # Friendly "Name" tag so the instances are recognizable in the EC2 console
+
+---
+# Each NodePool must reference an EC2NodeClass using spec.template.spec.nodeClassRef.
+apiVersion: karpenter.sh/v1   # Core, cloud-agnostic Karpenter API group - scheduling/provisioning policy lives here
+kind: NodePool                # Defines WHEN/WHAT nodes get created: scheduling requirements, size limits, disruption rules
+
+metadata:
+  name: node-pool-priority
+
+spec:
+# Provisioned nodes will have these taints
+# Taints may prevent pods from scheduling if they are not tolerated by the pod.
+  template:
+    metadata:
+      labels:
+        priority-node: "true"        # Every node from this pool gets this label - pods use nodeAffinity on it to explicitly request a "priority" node (app2 uses this)
+
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws     # Points back at the EC2NodeClass's API group
+        kind: EC2NodeClass
+        name: node-class-priority    # ...and its name - this is how the pool picks up the AMI/IAM/subnet/SG config defined above
+
+      taints:
+      - key: priority-taint
+        effect: NoSchedule            # Nodes from this pool repel any pod that doesn't explicitly tolerate "priority-taint" - keeps unrelated workloads (e.g. app1) off this pool
+
+      expireAfter: 336h            # 14 days - forces a node refresh (drain + replace) every 2 weeks, even if it's healthy and busy
+      terminationGracePeriod: 20m  # Hard cap on how long Karpenter waits for a graceful drain before force-terminating the instance anyway (longer than standard's 15m - priority workloads get more time to shut down cleanly)
+
+      requirements:
+      - key: node.kubernetes.io/instance-type
+        operator: In
+        values: ["t3.medium"]        # Only this exact instance type is allowed - keeps cost predictable instead of letting Karpenter pick freely from the t3 family
+
+      - key: topology.kubernetes.io/zone
+        operator: In
+        values: ["us-east-1a", "us-east-1b", "us-east-1c"]   # Nodes may land in any of these 3 AZs - gives Karpenter/AWS more capacity options to satisfy a launch
+
+      - key: kubernetes.io/arch
+        operator: In
+        values: ["amd64"]            # x86_64 only - no ARM/Graviton nodes (avoids needing multi-arch container images)
+
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values: ["on-demand"]        # Only On-Demand instances, never Spot - trades away Spot's cost savings for zero interruption risk in this lab
+
+  # Resource limits constrain the total size of the pool.
+  # Limits prevent Karpenter from creating new instances once the limit is exceeded.
+  limits:
+    cpu: 10       # Hard ceiling: total vCPUs across every node in this pool can never exceed 10 (~5x t3.medium) - a cost guardrail (this is also the wall the app2/KEDA scaling test is bounded by)
+    memory: 20Gi  # Same idea for memory - whichever of the two limits is hit first stops any further scale-out
+
+  # Disruption section which describes the ways in which Karpenter can disrupt and replace Nodes
+  # Configuration in this section constrains how aggressive Karpenter can be with performing operations
+  # like rolling Nodes due to them hitting their maximum lifetime (expiry) or scaling down nodes to reduce cluster cost
+  disruption:
+    consolidationPolicy: WhenEmpty     # Only ever consolidate (remove) a node once it has zero non-daemonset pods left on it - never repacks/evicts pods that are still running just to shrink the pool
+    consolidateAfter: 1m                # Unlike the standard pool's "Never", this actively enables consolidation: once a node sits empty for 1 minute, Karpenter is allowed to remove it - matters here since app2/KEDA scales this pool down to 0 pods regularly
+    budgets:
+    - nodes: "20%"                      # Normally at most 20% of this pool's nodes may be disrupted (consolidated/expired/rolled) at the same time - limits blast radius
+    # Consolidation window: block Empty/Underutilized consolidation all week EXCEPT Tue 07:00-09:00 UTC.
+    # Schedules are always UTC. 166h = 6d22h, so the block runs Tue 09:00 -> next Tue 07:00, leaving the
+    # Tue 07:00-09:00 gap as the only time the 20% budget above permits consolidation. Drift is unaffected.
+    - nodes: "0"                        # During its scheduled window, this budget overrides the one above: 0 nodes may be disrupted for the listed reasons
+      schedule: "0 9 * * 2"              # Cron expression: every Tuesday at 09:00 UTC - start of the blocked window
+      duration: 166h                     # Window lasts 166h (6 days 22h) - i.e. until next Tuesday 07:00 UTC
+      reasons:
+      - Empty                            # This budget restricts "Empty" disruptions - i.e. it blocks the consolidateAfter: 1m behavior above during this window
+      - Underutilized                    # ...and "Underutilized" ones (not otherwise triggered here since policy is WhenEmpty, listed for completeness/future-proofing). "Drifted" is deliberately NOT listed, so drift-triggered node replacement is never blocked by this schedule

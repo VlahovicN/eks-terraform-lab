@@ -1,0 +1,38 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: app2-sqs-trigger-auth
+  namespace: default
+spec:
+  podIdentity:
+    provider: aws
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: app2-scaledobject
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: app2-sqs-test
+  minReplicaCount: 0
+  maxReplicaCount: 9
+  cooldownPeriod: 60
+  pollingInterval: 15
+  triggers:
+    - type: cron
+      metadata:
+        timezone: Europe/Belgrade
+        start: "0 8 * * *"
+        end: "0 20 * * *"
+        desiredReplicas: "1"
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: app2-sqs-trigger-auth
+      metadata:
+        # NOTE: URL contains this lab's AWS account ID - not a secret (account IDs are
+        # visible in any ARN/CloudTrail entry), just replace it with your own account ID
+        # if you reuse this manifest in a different AWS account.
+        queueURL: https://sqs.us-east-1.amazonaws.com/187313585116/eks-lab-app2-queue
+        queueLength: "5"
+        awsRegion: us-east-1

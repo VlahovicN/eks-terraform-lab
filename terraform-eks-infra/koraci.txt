@@ -1,0 +1,14 @@
+INSTALIRAJ KARPENTER prvo!!!!
+
+
+
+
+
+
+
+- Terraform/EKS
+- Karpenter
+- ESO
+- KEDA
+- PDB
+- ALB

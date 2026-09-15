@@ -1,0 +1,5 @@
+global:
+  tolerations:
+    - key: "CriticalAddonsOnly"
+      operator: "Exists"
+      effect: "NoSchedule"

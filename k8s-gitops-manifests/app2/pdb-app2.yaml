@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: app2-pdb
+  namespace: default
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: app2-sqs-test

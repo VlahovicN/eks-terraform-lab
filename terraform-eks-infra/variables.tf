@@ -1,0 +1,2 @@
+variable "kubernetes_version" {
+}
