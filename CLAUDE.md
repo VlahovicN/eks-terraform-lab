@@ -7,6 +7,8 @@ LEARNING/
 │   │   └── values.yaml
 │   └── karpenter/
 │       └── values.yaml
+├── argocd/
+│   └── application.yaml
 ├── k8s-gitops-manifests/
 │   ├── app1/
 │   │   ├── deploy-app1.yaml
@@ -76,8 +78,11 @@ LEARNING/
   * Testiranje dinamičkog skaliranja (sa 0 na N i nazad) i provera kako Karpenter pali nove `t3.medium` nodove (uz granicu do 3-4 noda) - **čeka na quota increase, videti gore**.
 * **Tačka 2: Kustomize Integracija — PAUZIRANO/PRESKOČENO**
   * Odlučeno da se preskoči: samo jedan lab cluster (jedan "dev" overlay) daje malu funkcionalnu vrednost, a Kustomize nije preduslov za ArgoCD (ArgoCD radi i sa plain YAML direktorijumom). Može se revizitirati kasnije ako se pojavi realna potreba za više environment-a.
-* **Tačka 3: GitOps / ArgoCD — SLEDEĆE, čeka se da se nauči ArgoCD**
-  * Instalacija ArgoCD-a u klaster, `Application` resurs koji direktno prati `k8s-gitops-manifests/` (plain YAML, bez Kustomize-a).
+* **Tačka 3: GitOps / ArgoCD — kod gotov, čeka live test preko bootstrap.sh**
+  * ~~Instalacija ArgoCD-a preko Terraforma (`argocd.tf`, `helm_release`, ClusterIP, tolerations za `CriticalAddonsOnly`).~~ ✅
+  * ~~`argocd/application.yaml` - `Application` resurs (`project: default`, `repoURL` na GitHub, `path: k8s-gitops-manifests`, `directory.recurse: true`, `syncPolicy.automated` sa `prune`+`selfHeal`) koji prati CEO `k8s-gitops-manifests/` (karpenter, eso, app1, app2).~~ ✅
+  * ~~`bootstrap.sh` restrukturiran - uklonjeni rucni `kubectl apply` koraci za karpenter node-pool/eso/app1/app2 (ArgoCD ih sad sync-uje sam), dodat jedan finalni korak koji primenjuje `argocd/application.yaml` NA KRAJU skripte (mora ici posle svih Helm/CRD instalacija, inace bi prvi sync failovao dok CRD-ovi ne postoje - self-heal bi to na kraju popravio, ali bolje izbeci).~~ ✅
+  * **Napomena:** promena znaci da je ArgoCD od sad "gazda" nad tim resursima (selfHeal vraca svaku rucnu kubectl izmenu na stanje iz git-a) - jos NIJE live testirano end-to-end (ceka sledece pokretanje `bootstrap.sh`).
 * **Tačka 4: Portfolio polish (pred javni repo)**
   * ~~Ukloniti tfstate fajlove iz repoa (obrisana 2 stray/leftover tfstate fajla), `.gitignore` dodat (`.terraform/`, `*.tfstate*`).~~ ✅
   * ~~`eks.tf` hardkodovan account ID u KEDA operator trust policy zamenjen sa `data.aws_caller_identity.current.account_id`.~~ ✅

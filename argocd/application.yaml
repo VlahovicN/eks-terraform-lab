@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-lab-manifests
+  namespace: argocd   # Application resources always live in ArgoCD's own namespace, regardless of what they deploy
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/VlahovicN/eks-terraform-lab.git
+    targetRevision: main
+    path: k8s-gitops-manifests
+    directory:
+      recurse: true   # Pick up manifests from every subfolder (app1, app2, eso, karpenter), not just top-level files
+
+  destination:
+    server: https://kubernetes.default.svc   # "in-cluster" - the same cluster ArgoCD itself runs in
+    namespace: default                        # Fallback namespace for any manifest that doesn't set its own (all of ours do, or are cluster-scoped)
+
+  syncPolicy:
+    automated:
+      prune: true      # Delete cluster resources whose manifest was removed from git
+      selfHeal: true   # Revert any manual/out-of-band change back to match git
+    syncOptions:
+      - CreateNamespace=true

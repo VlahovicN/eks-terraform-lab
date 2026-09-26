@@ -42,15 +42,7 @@ helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
     -f ../helm/karpenter/values.yaml
 
 
-echo "=== 7. Applying Karpenter Manifest yaml files"
-
-cd /home/nikola/learning/k8s-gitops-manifests/karpenter
-sleep 60
-kubectl apply -f node-pool-standard.yaml
-kubectl apply -f node-pool-priority.yaml
-
-
-echo "=== 8. Instalacija External Secrets Operator-a (ESO) ==="
+echo "=== 7. Instalacija External Secrets Operator-a (ESO) ==="
 cd /home/nikola/learning/helm/eso
 
 helm repo add external-secrets https://charts.external-secrets.io
@@ -61,24 +53,10 @@ helm upgrade --install external-secrets external-secrets/external-secrets \
     -n external-secrets \
     --create-namespace
 
-echo "=== 9. Applying ESO Manifest yaml files"     
-cd /home/nikola/learning/k8s-gitops-manifests/eso
+echo "=== 8. Applying ArgoCD Application (preuzima sync za karpenter/eso/app1/app2 iz git-a) ==="
 sleep 30
-kubectl apply -f clustersecretstore.yaml
-kubectl apply -f externalsecret.yaml
-
-
-echo "=== 10. Deploying app1 ==="
-cd /home/nikola/learning/k8s-gitops-manifests/app1
-kubectl apply -f deploy-app1.yaml
-kubectl apply -f pdb-app1.yaml
-
-
-echo "=== 11. Deploying app2 i KEDA ScaledObject ==="
-cd /home/nikola/learning/k8s-gitops-manifests/app2
-kubectl apply -f deploy-app2.yaml
-kubectl apply -f scaledobject-app2.yaml
-kubectl apply -f pdb-app2.yaml
+cd /home/nikola/learning
+kubectl apply -f argocd/application.yaml
 
 
 echo "=== SVE JE USPEŠNO ZAVRŠENO! ==="
