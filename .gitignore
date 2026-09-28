@@ -11,3 +11,6 @@ override.tf.json
 *_override.tf.json
 
 # Kept intentionally: .terraform.lock.hcl (pins provider versions, safe/useful to commit)
+
+# Claude Code working directory (agent worktrees, session state) - not part of the project
+.claude/
