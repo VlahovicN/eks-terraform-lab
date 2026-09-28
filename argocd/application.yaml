@@ -23,3 +23,11 @@ spec:
       selfHeal: true   # Revert any manual/out-of-band change back to match git
     syncOptions:
       - CreateNamespace=true
+
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: app2-sqs-test
+      namespace: default
+      jsonPointers:
+        - /spec/replicas   # KEDA's HPA owns replica count for app2; without this, selfHeal fights KEDA's scale-to-0/scale-up

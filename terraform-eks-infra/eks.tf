@@ -206,7 +206,11 @@ resource "helm_release" "keda" {
     })
   ]
 
-  depends_on = [module.eks]
+  # Must come AFTER the pod identity association below, otherwise the keda-operator
+  # pod starts before its Pod Identity Association exists, misses the EKS Pod Identity
+  # credential env vars (only injected at pod creation time), and silently falls back
+  # to the node's own EC2 instance role (no SQS permissions) instead of keda_operator_role.
+  depends_on = [module.eks, aws_eks_pod_identity_association.keda_operator]
 }
 
 
@@ -288,7 +292,9 @@ resource "aws_eks_pod_identity_association" "keda_operator" {
   service_account = "keda-operator"
   role_arn        = aws_iam_role.keda_operator_role.arn
 
-  depends_on = [helm_release.keda]
+  # No dependency on helm_release.keda - this must exist BEFORE that Helm release
+  # creates the keda-operator pod (see comment on helm_release.keda above).
+  depends_on = [aws_iam_role_policy_attachment.keda_operator_attach]
 }
 
 
