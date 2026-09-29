@@ -26,36 +26,26 @@ export ALIAS_VERSION="$(aws ssm get-parameter --name "/aws/service/eks/optimized
 echo "Provera promenljivih:"
 echo "$KARPENTER_NAMESPACE" "$KARPENTER_VERSION" "$K8S_VERSION" "$CLUSTER_NAME" "$AWS_DEFAULT_REGION" "$AWS_ACCOUNT_ID"
 
+
+# JUST FOR THE REFERENCE
+# curl -fsSL "https://raw.githubusercontent.com/aws/karpenter-provider-aws/v${KARPENTER_VERSION}/website/content/en/preview/getting-started/getting-started-with-karpenter/cloudformation.yaml" > "$TEMPOUT" \
+#   && aws cloudformation deploy \
+#     --stack-name "Karpenter-$CLUSTER_NAME" \
+#     --template-file "$TEMPOUT" \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --parameter-overrides "ClusterName=$CLUSTER_NAME"
+
+
 echo "=== 4. Čišćenje starih CRD-ova (ako postoje) ==="
 kubectl delete crd ec2nodeclasses.karpenter.k8s.aws nodepools.karpenter.sh nodeclaims.karpenter.sh nodeoverlays.karpenter.sh --ignore-not-found=true
 
-echo "=== 5. Instalacija Karpenter CRD-ova (Prvo ovo!) ==="
-helm upgrade --install karpenter-crd oci://public.ecr.aws/karpenter/karpenter-crd \
-    --version "$KARPENTER_VERSION" \
-    --namespace "$KARPENTER_NAMESPACE" \
-    --create-namespace
-
-echo "=== 6. Instalacija Karpenter Kontrolera ==="
-helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
-    --version "$KARPENTER_VERSION" \
-    -n "$KARPENTER_NAMESPACE" \
-    -f ../helm/karpenter/values.yaml
-
-
-echo "=== 7. Instalacija External Secrets Operator-a (ESO) ==="
-cd /home/nikola/learning/helm/eso
-
-helm repo add external-secrets https://charts.external-secrets.io
-helm repo update
-
-helm upgrade --install external-secrets external-secrets/external-secrets \
-    --values values.yaml \
-    -n external-secrets \
-    --create-namespace
-
-echo "=== 8. Applying ArgoCD Application (preuzima sync za karpenter/eso/app1/app2 iz git-a) ==="
+echo "=== 5. Applying ArgoCD Application za infra Helm chart-ove (karpenter-crd, karpenter, external-secrets) ==="
 sleep 30
 cd /home/nikola/learning
+kubectl apply -f argocd/infra-helm-charts.yaml
+
+echo "=== 6. Applying ArgoCD Application za k8s-gitops-manifests (karpenter node-pools, eso, app1, app2) ==="
+sleep 60
 kubectl apply -f argocd/application.yaml
 
 

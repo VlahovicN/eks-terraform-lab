@@ -8,7 +8,8 @@ LEARNING/
 │   └── karpenter/
 │       └── values.yaml
 ├── argocd/
-│   └── application.yaml
+│   ├── application.yaml
+│   └── infra-helm-charts.yaml
 ├── k8s-gitops-manifests/
 │   ├── app1/
 │   │   ├── deploy-app1.yaml
@@ -83,7 +84,8 @@ LEARNING/
   * ~~`argocd/application.yaml` - `Application` resurs (`project: default`, `repoURL` na GitHub, `path: k8s-gitops-manifests`, `directory.recurse: true`, `syncPolicy.automated` sa `prune`+`selfHeal`) koji prati CEO `k8s-gitops-manifests/` (karpenter, eso, app1, app2).~~ ✅
   * ~~`bootstrap.sh` restrukturiran - uklonjeni rucni `kubectl apply` koraci za karpenter node-pool/eso/app1/app2 (ArgoCD ih sad sync-uje sam), dodat jedan finalni korak koji primenjuje `argocd/application.yaml` NA KRAJU skripte (mora ici posle svih Helm/CRD instalacija, inace bi prvi sync failovao dok CRD-ovi ne postoje - self-heal bi to na kraju popravio, ali bolje izbeci).~~ ✅
   * ~~Live testirano preko `bootstrap.sh` - `Application` je `Synced`+`Healthy`.~~ ✅
-  * **Bug nadjen i ispravljen:** `aws_eks_pod_identity_association.keda_operator` je imao `depends_on = [helm_release.keda]` - obrnut redosled (Helm chart/keda-operator pod se pravio PRE nego sto Association postoji), pa je pod svaki put na svez apply padao na node-ov EC2 instance role (bez SQS dozvola) umesto na svoju Pod Identity rolu - isti simptom kao onaj `provider: aws-eks` bug od ranije, samo drugi uzrok. Ispravljeno okretanjem zavisnosti (`helm_release.keda` sad zavisi od asocijacije, ne obrnuto) u `eks.tf` - sprecava ponavljanje na buducim `bootstrap.sh` pokretanjima od nule. Na VEC zivom klasteru i dalje treba rucni `kubectl -n keda rollout restart deployment keda-operator` (Terraform depends_on promena ne dira postojece resurse).
+  * **Novo:** `argocd/infra-helm-charts.yaml` - 3 dodatne `Application` (jedna po chart-u: `karpenter-crd`, `karpenter` OCI chart-ovi + `external-secrets`), koje preuzimaju instalaciju Helm chart-ova koji su ranije isli rucno preko `bootstrap.sh` (`helm upgrade --install`). Values su inline-ovani u samom Application manifestu (dupliraju `helm/karpenter/values.yaml` i `helm/eso/values.yaml` - remote Helm izvor ne moze da cita `valueFile` iz ovog git repoa). `bootstrap.sh` restrukturiran - koraci 5-6 sad samo `kubectl apply` ta dva Application fajla (prvo infra-helm-charts, ZATIM application.yaml - CRD-ovi moraju postojati pre nego sto se NodePool/ClusterSecretStore CR-ovi primene). **NIJE JOS TESTIRANO** (klaster trenutno dole) - posebno OCI `repoURL` sintaksa (`public.ecr.aws/karpenter` bez `oci://` prefiksa, `chart:` posebno polje) je moja najbolja pretpostavka na osnovu ArgoCD dokumentacije, nisam mogao da provverim live. Prvi sledeci `bootstrap.sh` run treba paziti na sync status ova 3 nova Application-a. Env promenljive `KARPENTER_NAMESPACE`/`KARPENTER_VERSION` u koraku 3 su sada mrtve (vise se ne koriste), ostavljene za sada.
+  * **Bug nadjen i ispravljen (ranije):** `aws_eks_pod_identity_association.keda_operator` je imao `depends_on = [helm_release.keda]` - obrnut redosled (Helm chart/keda-operator pod se pravio PRE nego sto Association postoji), pa je pod svaki put na svez apply padao na node-ov EC2 instance role (bez SQS dozvola) umesto na svoju Pod Identity rolu - isti simptom kao onaj `provider: aws-eks` bug od ranije, samo drugi uzrok. Ispravljeno okretanjem zavisnosti (`helm_release.keda` sad zavisi od asocijacije, ne obrnuto) u `eks.tf` - sprecava ponavljanje na buducim `bootstrap.sh` pokretanjima od nule. Na VEC zivom klasteru i dalje treba rucni `kubectl -n keda rollout restart deployment keda-operator` (Terraform depends_on promena ne dira postojece resurse).
 * **Tačka 4: Portfolio polish (pred javni repo)**
   * ~~Ukloniti tfstate fajlove iz repoa (obrisana 2 stray/leftover tfstate fajla), `.gitignore` dodat (`.terraform/`, `*.tfstate*`).~~ ✅
   * ~~`eks.tf` hardkodovan account ID u KEDA operator trust policy zamenjen sa `data.aws_caller_identity.current.account_id`.~~ ✅

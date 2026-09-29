@@ -1,0 +1,98 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter-crd
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: public.ecr.aws/karpenter   # OCI registry - no oci:// prefix here, ArgoCD infers it from repoURL+chart
+    chart: karpenter-crd
+    targetRevision: "1.12.1"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: public.ecr.aws/karpenter
+    chart: karpenter
+    targetRevision: "1.12.1"
+    helm:
+      # Mirrors helm/karpenter/values.yaml - kept inline since this is a remote
+      # (non-git) Helm source, ArgoCD can't read a valueFile from this repo.
+      values: |
+        image:
+          repository: public.ecr.aws/karpenter/controller
+          tag: 1.12.1
+
+        controller:
+          resources:
+            limits:
+              cpu: 1
+              memory: 1Gi
+            requests:
+              cpu: 1
+              memory: 1Gi
+
+        settings:
+          clusterName: eks-lab
+          interruptionQueue: Karpenter-eks-lab
+
+        tolerations:
+        - effect: NoSchedule
+          key: CriticalAddonsOnly
+          operator: Exists
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-secrets
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.external-secrets.io
+    chart: external-secrets
+    targetRevision: "2.11.0"
+    helm:
+      # Mirrors helm/eso/values.yaml
+      values: |
+        global:
+          tolerations:
+            - key: "CriticalAddonsOnly"
+              operator: "Exists"
+              effect: "NoSchedule"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true   # ESO's CRDs (ClusterSecretStore/SecretStore) are too large for the
+                                 # kubectl.kubernetes.io/last-applied-configuration annotation (256KB
+                                 # cap) that default client-side apply embeds - SSA skips that entirely.
