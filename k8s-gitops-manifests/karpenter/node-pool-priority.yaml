@@ -7,6 +7,8 @@ kind: EC2NodeClass                 # Defines HOW a node is built on AWS: AMI, IA
 
 metadata:
   name: node-class-priority        # Referenced by name from the NodePool's nodeClassRef further down
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 
 spec:
   amiFamily: AL2023                 # Base OS family for the node - Amazon Linux 2023
@@ -40,6 +42,8 @@ kind: NodePool                # Defines WHEN/WHAT nodes get created: scheduling 
 
 metadata:
   name: node-pool-priority
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 
 spec:
 # Provisioned nodes will have these taints

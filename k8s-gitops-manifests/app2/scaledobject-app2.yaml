@@ -3,6 +3,8 @@ kind: TriggerAuthentication
 metadata:
   name: app2-sqs-trigger-auth
   namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   podIdentity:
     provider: aws
@@ -12,6 +14,8 @@ kind: ScaledObject
 metadata:
   name: app2-scaledobject
   namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   scaleTargetRef:
     name: app2-sqs-test

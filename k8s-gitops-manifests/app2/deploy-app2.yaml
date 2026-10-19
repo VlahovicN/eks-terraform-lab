@@ -3,12 +3,16 @@ kind: ServiceAccount
 metadata:
   name: app2-sa
   namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app2-sqs-test
   namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   selector:
     matchLabels:

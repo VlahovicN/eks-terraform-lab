@@ -3,6 +3,8 @@ kind: PodDisruptionBudget
 metadata:
   name: app2-pdb
   namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   maxUnavailable: 1
   selector:
