@@ -94,3 +94,8 @@ LEARNING/
   * ~~README.md na engleskom (arhitektura, rationale, ne samo šta je urađeno).~~ ✅
   * GitHub Actions CI (terraform fmt/validate, tflint, kubeconform/yamllint) - **preostaje**.
   * ~~Git init, lokalni git identitet (licni email, ne firmin - podeseno samo `--local` za ovaj repo), push na `https://github.com/VlahovicN/eks-terraform-lab` (branch `main`).~~ ✅
+* **Tačka 5: ArgoCD napredno — SAMO NAKON što se prođe u kursu (ne radi se unapred)**
+  * **Sync waves** unutar `eks-lab-manifests` (npr. `ClusterSecretStore` wave 0, `ExternalSecret` wave 1, `app1`/`app2` wave 2) da se ukloni kratko `Degraded` stanje kad app2 pročita `eso-config` pre nego što ga ESO napravi. Trenutno to rešava samo retry/self-heal.
+  * **App-of-Apps** (verovatno uvesti): waves rade samo unutar jednog Application-a, pa ne rešavaju CRD → CR redosled između `infra-helm-charts` (CRD-ovi) i `eks-lab-manifests` (NodePool/ClusterSecretStore). To rešava tek parent Application sa wave anotacijama na child `Application` objektima.
+  * **AppProject**: odlučeno da se preskoči (jedan korisnik, jedan klaster, `project: default` je dovoljan). Opciono za kraj kursa: podela na `infra` i `apps` projekat radi učenja/portfolija.
+  * **Argo Rollouts (canary/blue-green)**: NE primenjivati na `app1`/`app2` (placeholder `sleep infinity` podovi bez Service-a i saobraćaja, a app2 skalira KEDA). Ako se vežba za kurs, raditi kao izolovan demo (npr. nginx + Service u zasebnom namespace-u i Application-u), odvojeno od lab infrastrukture.
