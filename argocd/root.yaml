@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/VlahovicN/eks-terraform-lab.git
+    targetRevision: main
+    path: argocd/apps   # Every Application manifest in this folder becomes a child of this root app
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd   # Children are Application objects, and those always live in ArgoCD's own namespace
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

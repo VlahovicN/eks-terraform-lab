@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"   # Controller starts after its CRDs (karpenter-crd, wave 0) exist
+spec:
+  project: default
+  source:
+    repoURL: public.ecr.aws/karpenter
+    chart: karpenter
+    targetRevision: "1.12.1"
+    helm:
+      # Mirrors helm/karpenter/values.yaml - kept inline since this is a remote
+      # (non-git) Helm source, ArgoCD can't read a valueFile from this repo.
+      values: |
+        image:
+          repository: public.ecr.aws/karpenter/controller
+          tag: 1.12.1
+
+        controller:
+          resources:
+            limits:
+              cpu: 1
+              memory: 1Gi
+            requests:
+              cpu: 1
+              memory: 1Gi
+
+        settings:
+          clusterName: eks-lab
+          interruptionQueue: Karpenter-eks-lab
+
+        tolerations:
+        - effect: NoSchedule
+          key: CriticalAddonsOnly
+          operator: Exists
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

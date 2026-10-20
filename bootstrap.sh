@@ -39,14 +39,10 @@ echo "$KARPENTER_NAMESPACE" "$KARPENTER_VERSION" "$K8S_VERSION" "$CLUSTER_NAME" 
 echo "=== 4. Čišćenje starih CRD-ova (ako postoje) ==="
 kubectl delete crd ec2nodeclasses.karpenter.k8s.aws nodepools.karpenter.sh nodeclaims.karpenter.sh nodeoverlays.karpenter.sh --ignore-not-found=true
 
-echo "=== 5. Applying ArgoCD Application za infra Helm chart-ove (karpenter-crd, karpenter, external-secrets) ==="
+echo "=== 5. Applying ArgoCD root Application (App-of-Apps: karpenter-crd, external-secrets, karpenter, eks-lab-manifests) ==="
 sleep 30
 cd /home/nikola/learning
-kubectl apply -f argocd/infra-helm-charts.yaml
-
-echo "=== 6. Applying ArgoCD Application za k8s-gitops-manifests (karpenter node-pools, eso, app1, app2) ==="
-sleep 60
-kubectl apply -f argocd/application.yaml
+kubectl apply -f argocd/root.yaml
 
 
 echo "=== SVE JE USPEŠNO ZAVRŠENO! ==="

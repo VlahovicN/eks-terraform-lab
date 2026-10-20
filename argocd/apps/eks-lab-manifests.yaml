@@ -3,6 +3,8 @@ kind: Application
 metadata:
   name: eks-lab-manifests
   namespace: argocd   # Application resources always live in ArgoCD's own namespace, regardless of what they deploy
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"   # Last: its NodePool/ClusterSecretStore CRs need the CRDs from waves 0 and 1
 spec:
   project: default
 
