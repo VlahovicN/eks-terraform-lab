@@ -1,12 +1,24 @@
 # AWS EKS Autoscaling Lab
 
-A personal, hands-on AWS EKS lab built to go past "click-ops tutorial" level and into the parts that actually break in practice: dual-axis autoscaling (pod-level via KEDA, node-level via Karpenter), GitOps delivery with ArgoCD, least-privilege AWS auth via EKS Pod Identity, cost guardrails, and the debugging that happens when documentation and reality disagree.
+![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform&logoColor=white)
+![EKS](https://img.shields.io/badge/AWS-EKS_1.35-FF9900?logo=amazoneks&logoColor=white)
+![ArgoCD](https://img.shields.io/badge/ArgoCD-GitOps-EF7B4D?logo=argo&logoColor=white)
+![Karpenter](https://img.shields.io/badge/Karpenter-node_autoscaling-1F6FEB)
+![KEDA](https://img.shields.io/badge/KEDA-pod_autoscaling-326CE5)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-Terraform provisions the AWS side, the EKS cluster and ArgoCD itself. From there ArgoCD (App-of-Apps pattern) pulls everything else from this git repo: Karpenter, External Secrets Operator, KEDA and the sample applications. A single `bootstrap.sh` script ties the two phases together.
+A personal, hands-on AWS EKS lab that goes past the "deploy nginx" tutorial level and into the parts that actually break in practice: dual-axis autoscaling (pods via **KEDA**, nodes via **Karpenter**), GitOps delivery with **ArgoCD**, least-privilege AWS auth with **EKS Pod Identity**, cost guardrails, and the debugging that happens when documentation and reality disagree.
 
-## Why this exists
+Terraform provisions the AWS side, the EKS cluster and ArgoCD itself. From there ArgoCD (App-of-Apps pattern) pulls everything else from this repo: Karpenter, External Secrets Operator, KEDA and the sample applications. A single `bootstrap.sh` ties the two phases together.
 
-Most EKS tutorials stop at "deploy nginx and call it done." This lab intentionally goes further: two isolated node pools with different disruption policies, a workload that scales on a combination of a cron schedule *and* real SQS queue depth, and infrastructure sized specifically so that a pod-scaling event also forces a node-scaling event - so both autoscalers can be watched reacting together, not in isolation. Everything after the cluster itself is delivered through GitOps, with explicit ordering between operators (CRDs) and the resources that depend on them.
+## Highlights
+
+- **Fully GitOps after the first command.** One root ArgoCD `Application` fans out into five child Applications, ordered with sync waves so CRDs always exist before the resources that need them.
+- **Two autoscalers, watched together.** `app2` scales 0 to 9 pods on a Cron + SQS trigger and is sized so a full scale-up forces Karpenter to add nodes at the same time.
+- **EKS Pod Identity everywhere** (ESO, KEDA, Karpenter, `app2`), with no IRSA OIDC annotations.
+- **Cost guardrails by design:** hard NodePool limits, on-demand only, 14-day node expiry, a scheduled consolidation window, and a public-subnet VPC with no NAT gateway.
+- **Documented failures.** Every real bug hit while building this (and its root cause) is written up in [Real-world debugging notes](#real-world-debugging-notes).
+- **Verified on a fresh cluster**, not just on paper. See [Verified results](#verified-results).
 
 ## Architecture
 
@@ -55,14 +67,26 @@ graph TB
     GH -->|git pull| ArgoCD
 ```
 
-Two Karpenter `NodePool`s exist instead of one generic pool, on purpose: `node-pool-standard` (label `standard-node`, taint `standard-taint`) hosts `app1`, and `node-pool-priority` (label `priority-node`, taint `priority-taint`) hosts `app2`. Splitting them means each pool can carry its own disruption/consolidation policy and its own blast-radius budget, and workloads can't accidentally land on the wrong pool.
+Two Karpenter `NodePool`s exist instead of one generic pool, on purpose: `node-pool-standard` (label `standard-node`, taint `standard-taint`) hosts `app1`, and `node-pool-priority` (label `priority-node`, taint `priority-taint`) hosts `app2`. Splitting them means each pool carries its own disruption policy and blast-radius budget, and workloads cannot land on the wrong pool by accident.
+
+### Bootstrap order
+
+```mermaid
+flowchart LR
+    A["terraform apply<br/>VPC, EKS, IAM,<br/>Pod Identity, ArgoCD"] --> B["kubectl apply<br/>argocd/root.yaml"]
+    B --> C["Wave 0<br/>karpenter-crd<br/>external-secrets<br/>keda"]
+    C --> D["Wave 1<br/>karpenter"]
+    D --> E["Wave 2<br/>eks-lab-manifests<br/>NodePools, ESO config,<br/>app1, app2"]
+```
+
+Inside `eks-lab-manifests` there are further waves: `ClusterSecretStore` and `EC2NodeClass`, then `ExternalSecret` and `NodePool`, then the workloads and PDBs, and finally the `ScaledObject`.
 
 ## Components
 
 | Path | What it is |
 |---|---|
 | `terraform-eks-infra/` | VPC, EKS cluster, ArgoCD (the only Helm release left in Terraform), Karpenter IAM (Pod Identity), KEDA's IAM role + Pod Identity Association, ESO's IAM role, `app2`'s SQS queue + IAM role |
-| `argocd/root.yaml` | The root `Application` (App-of-Apps). The only ArgoCD resource applied by hand/by `bootstrap.sh` |
+| `argocd/root.yaml` | The root `Application` (App-of-Apps). The only ArgoCD resource applied by hand / by `bootstrap.sh` |
 | `argocd/apps/` | Five child `Application`s: `karpenter-crd`, `external-secrets`, `keda` (sync wave 0), `karpenter` (wave 1), `eks-lab-manifests` (wave 2). Helm values are inlined here |
 | `k8s-gitops-manifests/karpenter/` | `EC2NodeClass` + `NodePool` definitions for both pools |
 | `k8s-gitops-manifests/eso/` | `ClusterSecretStore` + `ExternalSecret` pulling from SSM Parameter Store |
@@ -73,24 +97,59 @@ Two Karpenter `NodePool`s exist instead of one generic pool, on purpose: `node-p
 
 ## Key design decisions
 
-- **GitOps with App-of-Apps and sync waves.** One root `Application` points at `argocd/apps/`, and each child carries a `sync-wave` annotation so operators and their CRDs (`karpenter-crd`, `external-secrets`, `keda`: wave 0) are `Healthy` before the controller (`karpenter`: wave 1) and before the custom resources that need those CRDs (`eks-lab-manifests`: wave 2). For the parent to actually wait on a child, ArgoCD needs a custom Lua health check for `Application` objects, which is set in `terraform-eks-infra/argocd.tf`. Inside `eks-lab-manifests` there are further waves (`ClusterSecretStore` before `ExternalSecret` before workloads before `ScaledObject`).
-- **ArgoCD is the single owner of cluster add-ons and workloads; Terraform owns AWS and ArgoCD itself.** ArgoCD cannot install itself, so it stays a Terraform `helm_release`. Everything else, including the Helm charts for Karpenter, ESO and KEDA, is an ArgoCD `Application`. IAM roles and Pod Identity Associations stay in Terraform because they are AWS-side resources.
-- **EKS Pod Identity over IRSA, everywhere.** ESO, KEDA, Karpenter, and `app2` all authenticate to AWS via Pod Identity Associations instead of IRSA's OIDC-annotation dance - one less moving part, and the pattern that AWS is pushing new workloads toward.
-- **Combined Cron + SQS KEDA trigger on `app2`.** A cron trigger guarantees at least 1 replica during "business hours" (08:00-20:00 Europe/Belgrade), while an SQS trigger reacts to actual queue depth on top of that. KEDA combines multiple triggers as OR (max of each trigger's desired replica count), so the two policies layer cleanly instead of fighting each other.
-- **`app2` is deliberately sized to co-force Karpenter scaling.** Each pod requests `500m`/`900Mi`, chosen so exactly 3 pods fit on one `t3.medium` (~1930m/~3292Mi allocatable). With `maxReplicaCount: 9`, a full scale-up needs 3 nodes - so sending SQS messages exercises KEDA (pod count) and Karpenter (node count) at the same time instead of one masking the other.
-- **PDBs use `maxUnavailable: 1`, not `minAvailable`.** Simpler mental model, but it's a conscious trade-off: when only one replica is up (e.g. `app2`'s cron-guaranteed baseline), `maxUnavailable: 1` still permits evicting that single pod. `minAvailable: 1` would protect it, at the cost of blocking node drains whenever the workload is scaled down. For this lab, simplicity won.
-- **Cost guardrails on both NodePools:** hard `cpu`/`memory` limits (~5 nodes worth), on-demand only (no Spot, for predictability over savings), a 14-day forced node expiry, and a scheduled weekly window that blocks empty/underutilized consolidation except for a 2-hour Tuesday-morning gap.
+- **GitOps with App-of-Apps and sync waves.** One root `Application` points at `argocd/apps/`, and each child carries a `sync-wave` annotation so operators and their CRDs (`karpenter-crd`, `external-secrets`, `keda`: wave 0) are `Healthy` before the controller (`karpenter`: wave 1) and before the custom resources that need those CRDs (`eks-lab-manifests`: wave 2). For the parent to actually wait on a child, ArgoCD needs a custom Lua health check for `Application` objects, set in `terraform-eks-infra/argocd.tf`.
+- **ArgoCD owns cluster add-ons and workloads; Terraform owns AWS and ArgoCD itself.** ArgoCD cannot install itself, so it stays a Terraform `helm_release`. Everything else, including the Helm charts for Karpenter, ESO and KEDA, is an ArgoCD `Application`. IAM roles and Pod Identity Associations stay in Terraform because they are AWS-side resources. This split also fixes an ordering problem structurally: Terraform (including the Pod Identity Association) always finishes before ArgoCD installs the operator that needs it.
+- **EKS Pod Identity over IRSA, everywhere.** ESO, KEDA, Karpenter and `app2` all authenticate to AWS through Pod Identity Associations instead of IRSA's OIDC-annotation setup: one less moving part, and the pattern AWS is steering new workloads toward.
+- **Combined Cron + SQS KEDA trigger on `app2`.** A cron trigger guarantees at least 1 replica during business hours (08:00-20:00 Europe/Belgrade), while an SQS trigger reacts to actual queue depth on top of that. KEDA combines multiple triggers as OR (the max of each trigger's desired replica count), so the two policies layer instead of fighting each other. Outside that window with an empty queue, `app2` correctly sits at 0 replicas.
+- **`app2` is deliberately sized to co-force Karpenter scaling.** Each pod requests `500m`/`900Mi`, chosen so exactly 3 pods fit on one `t3.medium` (~1930m/~3292Mi allocatable). With `maxReplicaCount: 9`, a full scale-up needs 3 nodes, so sending SQS messages exercises KEDA (pod count) and Karpenter (node count) at the same time instead of one masking the other.
+- **PDBs use `maxUnavailable: 1`, not `minAvailable`.** Simpler mental model, but a conscious trade-off: when only one replica is up (e.g. `app2`'s cron-guaranteed baseline), `maxUnavailable: 1` still permits evicting that single pod. `minAvailable: 1` would protect it, at the cost of blocking node drains whenever the workload is scaled down. For this lab, simplicity won.
+- **Cost guardrails on both NodePools:** hard `cpu`/`memory` limits (~5 nodes worth), on-demand only (predictability over Spot savings), a 14-day forced node expiry, and a scheduled weekly window that blocks empty/underutilized consolidation except for a 2-hour Tuesday-morning gap. The VPC uses public subnets and no NAT gateway to avoid its hourly and data costs.
+- **`terraform.tfvars` is committed on purpose.** It contains a single value (`kubernetes_version`) and nothing sensitive, so it stays in the repo as a visible, reproducible input. State files, `.terraform/` and local notes are gitignored.
 - **Deliberately skipped:** Kustomize (one cluster, little value, and not required by ArgoCD), ArgoCD `AppProject`s (`default` is enough for a single user), ApplicationSets (five different Applications, not one template), and Argo Rollouts on `app1`/`app2` (placeholder pods with no traffic to shift).
+
+## Verified results
+
+Captured on a freshly bootstrapped cluster (`bootstrap.sh` from zero, then one `git push` of the KEDA Application):
+
+```text
+$ kubectl get application -n argocd
+NAME                SYNC STATUS   HEALTH STATUS
+eks-lab-manifests   Synced        Healthy
+external-secrets    Synced        Healthy
+karpenter           Synced        Healthy
+karpenter-crd       Synced        Healthy
+keda                Synced        Healthy
+root                Synced        Healthy
+
+$ kubectl get scaledobject
+NAME                SCALETARGETNAME   MIN   MAX   READY   ACTIVE   TRIGGERS             AUTHENTICATIONS
+app2-scaledobject   app2-sqs-test     0     9     True    False    cron,aws-sqs-queue   app2-sqs-trigger-auth
+
+$ kubectl get nodeclaims
+NAME                       TYPE        CAPACITY    ZONE         READY
+node-pool-priority-54ksk   t3.medium   on-demand   us-east-1b   True
+node-pool-standard-jj8jf   t3.medium   on-demand   us-east-1b   True
+```
+
+What this confirms:
+
+- The root plus all five children converge to `Synced`/`Healthy` with no manual steps, in wave order.
+- `keda-operator` carries the Pod Identity credential variables (`AWS_CONTAINER_CREDENTIALS_FULL_URI`, `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`) with no restart workaround, which proves the Terraform-then-ArgoCD ordering.
+- `app1` runs 3/3 on a Karpenter-provisioned node. `app2` sits at 0 replicas with the `ScaledObject` `Ready=True, Active=False` outside the cron window and with an empty queue, as designed.
+- Karpenter provisioned one node per pool in response to pending pods, with no manual action.
 
 ## Real-world debugging notes
 
-The most useful part of this repo isn't the happy path - it's what broke and how it got diagnosed:
+The most useful part of this repo isn't the happy path, it's what broke and how it got diagnosed:
 
-- **KEDA's `aws-eks` Pod Identity provider is a dead end.** Setting `TriggerAuthentication.spec.podIdentity.provider: aws-eks` (the name that intuitively matches "EKS Pod Identity") instead throws `error parsing SQS queue metadata: awsAccessKeyID not found`. Reading KEDA's own source (`pkg/scalers/aws/aws_common.go`) showed why: only `provider: aws` is wired to the native Pod Identity/IRSA code path - `aws-eks` is a legacy branch that still expects static credentials. Diagnosed by going from operator logs straight to the upstream Go source, not by trial and error.
-- **A Pod Identity Association doesn't retroactively fix a running pod.** The KEDA operator pod had been scheduled before Terraform created its `aws_eks_pod_identity_association`, so it never got the AWS credential environment variables the EKS Pod Identity webhook injects at pod *creation* time, and silently fell back to the node's EC2 role (`AccessDenied` on SQS). The cause was a backwards `depends_on` in Terraform. Fixed by ordering: the association is created by `terraform apply`, and KEDA is installed afterwards by ArgoCD, so the ordering now holds by construction. On an already-running pod the workaround is `kubectl rollout restart deployment keda-operator`.
+- **KEDA's `aws-eks` Pod Identity provider is a dead end.** Setting `TriggerAuthentication.spec.podIdentity.provider: aws-eks` (the name that intuitively matches "EKS Pod Identity") instead throws `error parsing SQS queue metadata: awsAccessKeyID not found`. Reading KEDA's own source (`pkg/scalers/aws/aws_common.go`) showed why: only `provider: aws` is wired to the native Pod Identity/IRSA code path, while `aws-eks` is a legacy branch that still expects static credentials. Diagnosed by going from operator logs straight to the upstream Go source, not by trial and error.
+- **A Pod Identity Association doesn't retroactively fix a running pod.** The KEDA operator pod had been scheduled before Terraform created its `aws_eks_pod_identity_association`, so it never got the AWS credential environment variables the EKS Pod Identity webhook injects at pod *creation* time, and silently fell back to the node's EC2 role (`AccessDenied` on SQS). The cause was a backwards `depends_on` in Terraform. Fixed by ordering: the association is created by `terraform apply`, and KEDA is installed afterwards by ArgoCD, so the ordering holds by construction. On an already-running pod the workaround is `kubectl rollout restart deployment keda-operator`.
 - **ArgoCD `selfHeal` fights autoscalers over `replicas`.** `app2`'s Deployment had `replicas: 1` in git, ArgoCD kept restoring it, and KEDA kept scaling it back to 0, producing a create/run/terminate loop every ~15-60 seconds (visible as repeated `Original Replicas Count: 1 -> New Replicas Count: 0` in the KEDA operator log). Fixed with `ignoreDifferences` on `/spec/replicas` for that Deployment, and by removing the field from the manifest.
 - **ESO's CRDs are too big for client-side apply.** Through ArgoCD, the `external-secrets` chart failed with `metadata.annotations: Too long: may not be more than 262144 bytes`. Default client-side apply embeds a full copy of the manifest in the `last-applied-configuration` annotation, even on first create, and the `ClusterSecretStore`/`SecretStore` CRDs exceed Kubernetes' 256KB annotation limit. `helm install` never hit this because Helm tracks releases in its own Secrets. Fixed with `ServerSideApply=true` on that Application. A side effect worth knowing: charts installed through ArgoCD do not show up in `helm list`, since ArgoCD only renders templates and applies the YAML itself.
-- **New AWS accounts have a real, low vCPU ceiling.** Testing Karpenter's multi-node scale-out hit the default "Running On-Demand Standard instances" quota of 8 vCPUs - already fully consumed by the existing managed node group + both NodePools' baseline nodes. A quota increase request was submitted and denied ("ramp up usage first, reapply next billing cycle"), and checking the equivalent Spot quota showed the same ceiling. Documented as a known, external limitation rather than papered over.
+- **ArgoCD can only sync what is in git.** After moving KEDA from Terraform to an ArgoCD `Application`, the cluster came up with no KEDA pods and no app pods. The new `keda.yaml` existed only locally: the root app was still reading the old commit from GitHub, so the `keda` Application was never created, its CRDs never existed, and `eks-lab-manifests` stayed `Missing` with `failed to discover server resources for group version keda.sh/v1alpha1`. Fix: push, then force the root app to re-read git instead of waiting for the ~3 minute poll (`kubectl annotate application root -n argocd argocd.argoproj.io/refresh=hard --overwrite`).
+- **"No pods" is not always a failure.** With `minReplicaCount: 0`, `app2` correctly has zero pods when the queue is empty and the cron window is closed. A health check that waits for N running pods will wait forever, so check `ScaledObject` `Ready`/`Active` first.
+- **Fresh nodes in public subnets can time out on their first image pulls.** Karpenter-provisioned nodes briefly showed `ErrImagePull`/`ImagePullBackOff` with `i/o timeout` against ECR for `kube-proxy` and `eks-pod-identity-agent` while the node network was still settling. Kubelet's own retry resolved it with no change needed, but it is worth recognising so it isn't mistaken for a permissions problem.
+- **New AWS accounts have a real, low vCPU ceiling.** Testing Karpenter's multi-node scale-out hit the default "Running On-Demand Standard instances" quota of 8 vCPUs, already consumed by the managed node group plus both NodePools' baseline nodes. A quota increase request was submitted and denied ("ramp up usage first, reapply next billing cycle"), and the equivalent Spot quota showed the same ceiling. Documented as a known external limitation rather than papered over.
 
 ## Current status
 
@@ -102,27 +161,26 @@ The most useful part of this repo isn't the happy path - it's what broke and how
 | `app1` (static, ESO-backed) | Done |
 | `app2` + KEDA (Cron + SQS `ScaledObject`) | Done |
 | PodDisruptionBudgets | Done |
-| ArgoCD GitOps: App-of-Apps, sync waves, Karpenter + ESO + apps | Done, verified end-to-end on a fresh cluster |
-| KEDA installed through ArgoCD (previously a Terraform Helm release) | Written, not yet verified end-to-end |
-| Live Karpenter multi-node scaling test | Blocked on AWS account vCPU quota (see above) |
-| Kustomize | Deliberately skipped - not a prerequisite for ArgoCD, and low value for a single-cluster lab |
+| ArgoCD GitOps: App-of-Apps, sync waves, Karpenter + ESO + KEDA + apps | Done, verified end-to-end on a fresh cluster |
+| Live Karpenter multi-node scaling test (SQS burst to 9 pods, 3 nodes) | Blocked on AWS account vCPU quota (see above) |
+| Kustomize | Deliberately skipped, not a prerequisite for ArgoCD and low value for a single-cluster lab |
 | CI (`terraform fmt`/`validate`, `tflint`, manifest linting) | Planned |
 
 ## Running it
 
-Prerequisites: an AWS account, the AWS CLI configured with a profile that has sufficient permissions, Terraform, and `kubectl`. (No local Helm is needed: Terraform's Helm provider and ArgoCD do the chart work.)
+Prerequisites: an AWS account, the AWS CLI configured with a profile that has sufficient permissions, Terraform, and `kubectl`. No local Helm is needed: Terraform's Helm provider and ArgoCD do the chart work.
 
-ArgoCD reads this repo from GitHub, so changes must be pushed to `main` before they take effect. If you fork it, change `repoURL` in `argocd/root.yaml` and `argocd/apps/eks-lab-manifests.yaml`.
+ArgoCD reads this repo from GitHub, so **changes must be pushed to `main` before they take effect**. If you fork it, change `repoURL` in `argocd/root.yaml` and `argocd/apps/eks-lab-manifests.yaml`.
 
 ```bash
-# bootstrap.sh assumes an AWS CLI profile named "privatni" and absolute paths under /home/nikola/learning -
+# bootstrap.sh assumes an AWS CLI profile named "privatni" and absolute paths under /home/nikola/learning,
 # change AWS_PROFILE and the paths at the top of the script to match your setup
 ./bootstrap.sh
 ```
 
-This runs, in order: `terraform apply` (VPC, EKS, IAM, Pod Identity, ArgoCD), kubeconfig update, a cleanup of any stale Karpenter CRDs, then applies `argocd/root.yaml`. From there ArgoCD creates the child Applications in wave order: `karpenter-crd`, `external-secrets` and `keda`, then `karpenter`, then `eks-lab-manifests` (node pools, ESO config, `app1`, `app2`).
+This runs, in order: `terraform apply` (VPC, EKS, IAM, Pod Identity, ArgoCD), kubeconfig update, a cleanup of any stale Karpenter CRDs, then applies `argocd/root.yaml`. From there ArgoCD creates the child Applications in wave order: `karpenter-crd`, `external-secrets` and `keda`, then `karpenter`, then `eks-lab-manifests` (node pools, ESO config, `app1`, `app2`). Expect `app1`/`app2` to sit `Pending` for a minute or two while Karpenter launches the first nodes.
 
-Reach the ArgoCD UI with a port-forward (the service is ClusterIP on purpose, no load balancer cost); details are in `terraform-eks-infra/argocd-access.md`:
+Reach the ArgoCD UI with a port-forward (the service is ClusterIP on purpose, so there is no load balancer cost); details are in `terraform-eks-infra/argocd-access.md`:
 
 ```bash
 kubectl port-forward svc/argocd-server -n argocd 8080:443
@@ -139,13 +197,23 @@ for i in $(seq 1 45); do
 done
 ```
 
-Remember to `terraform destroy` when you're done; a running cluster costs roughly $0.30/hour.
+### Cost and cleanup
+
+A running cluster costs roughly **$0.30/hour** (EKS control plane, four `t3.medium` nodes, public IPv4 addresses, EBS). Tear it down when you're done:
+
+```bash
+terraform -chdir=terraform-eks-infra destroy
+```
 
 ## Known limitations
 
-- The `app1`/`app2` containers are placeholder `alpine:latest` (`sleep infinity`) - the point of this lab is the platform plumbing (autoscaling, secrets, IAM, GitOps), not the application logic.
+- The `app1`/`app2` containers are placeholder `alpine:latest` (`sleep infinity`). The point of this lab is the platform plumbing (autoscaling, secrets, IAM, GitOps), not application logic.
 - `k8s-gitops-manifests/app2/scaledobject-app2.yaml` has this lab's AWS account ID baked into the SQS queue URL. That's not a secret (account IDs show up in every ARN and CloudTrail entry regardless), just swap it for your own if you reuse this manifest.
 - `bootstrap.sh` has hardcoded absolute paths and an AWS profile name, and the ArgoCD `repoURL` points at the original repo (see "Running it").
 - Helm values for Karpenter and ESO exist twice: in `helm/` and inlined in `argocd/apps/`. A remote chart source cannot read a values file from this repo, and only the inlined copy is used.
-- The CRD → CR ordering relies on sync waves plus the custom `Application` health check. A failed automated sync is not retried for the same commit, so if something goes wrong on first bootstrap, a manual sync is needed.
-- The live "Karpenter scales to 3 nodes" test is code-complete but unverified end-to-end, pending the AWS quota increase described above. KEDA delivered through ArgoCD is likewise not yet verified end-to-end.
+- The CRD-before-CR ordering relies on sync waves plus the custom `Application` health check. A failed automated sync is not retried for the same commit, so if something goes wrong on first bootstrap, a manual sync is needed.
+- The live "Karpenter scales to 3 nodes" test is code-complete but unverified end-to-end, pending the AWS quota increase described above.
+
+## License
+
+Released under the [MIT License](LICENSE).

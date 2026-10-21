@@ -12,5 +12,12 @@ override.tf.json
 
 # Kept intentionally: .terraform.lock.hcl (pins provider versions, safe/useful to commit)
 
+# Kept intentionally: terraform-eks-infra/terraform.tfvars (only holds kubernetes_version, no sensitive values)
+
 # Claude Code working directory (agent worktrees, session state) - not part of the project
 .claude/
+
+# Personal working notes (kept locally, not part of the published project)
+CLAUDE.md
+terraform-eks-infra/beleske.txt
+terraform-eks-infra/koraci.txt
