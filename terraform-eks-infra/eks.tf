@@ -179,41 +179,6 @@ provider "helm" {
 
 
 
-###########################################################
-# KEDA                                                    #
-###########################################################
-resource "helm_release" "keda" {
-  name       = "keda"
-  namespace  = "keda"
-  repository = "https://kedacore.github.io/charts"
-  chart      = "keda"
-  version    = "2.19.0"
-
-  create_namespace = true
-
-  values = [
-    yamlencode({
-      metricsServer = {
-        enabled = true
-      }
-      tolerations = [
-        {
-          key      = "CriticalAddonsOnly"
-          operator = "Exists"
-          effect   = "NoSchedule"
-        }
-      ]
-    })
-  ]
-
-  # Must come AFTER the pod identity association below, otherwise the keda-operator
-  # pod starts before its Pod Identity Association exists, misses the EKS Pod Identity
-  # credential env vars (only injected at pod creation time), and silently falls back
-  # to the node's own EC2 instance role (no SQS permissions) instead of keda_operator_role.
-  depends_on = [module.eks, aws_eks_pod_identity_association.keda_operator]
-}
-
-
 ##########################################################################################
 # KEDA Pod Identity Setup (With custom SQS & CloudWatch permissions)
 ##########################################################################################
@@ -292,8 +257,11 @@ resource "aws_eks_pod_identity_association" "keda_operator" {
   service_account = "keda-operator"
   role_arn        = aws_iam_role.keda_operator_role.arn
 
-  # No dependency on helm_release.keda - this must exist BEFORE that Helm release
-  # creates the keda-operator pod (see comment on helm_release.keda above).
+  # Must exist BEFORE the keda-operator pod starts, otherwise the pod misses the EKS Pod
+  # Identity credential env vars (injected only at pod creation time) and silently falls
+  # back to the node's own EC2 role (no SQS permissions). KEDA is installed by ArgoCD
+  # (argocd/apps/keda.yaml), which only runs after `terraform apply` finishes, so this
+  # ordering now holds by construction.
   depends_on = [aws_iam_role_policy_attachment.keda_operator_attach]
 }
 
