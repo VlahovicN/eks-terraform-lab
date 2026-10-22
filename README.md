@@ -111,7 +111,8 @@ Inside `eks-lab-manifests` there are further waves: `ClusterSecretStore` and `EC
 
 The ArgoCD UI after a fresh `bootstrap.sh`: the `root` Application and its five children, all `Synced` and `Healthy`.
 
-<!-- OVDE ZALEPITI: screenshot ArgoCD UI-ja (App-of-Apps stablo). Zameni ovaj komentar slikom, npr. ![ArgoCD App-of-Apps tree, all Synced and Healthy](url) -->
+<img width="1907" height="956" alt="image" src="https://github.com/user-attachments/assets/2479404d-1298-4749-89f2-1384943587c4" />
+
 
 The same state from the command line, captured on a freshly bootstrapped cluster:
 
