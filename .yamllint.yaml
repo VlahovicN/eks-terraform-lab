@@ -1,0 +1,13 @@
+# yamllint config: keep the checks that catch real mistakes (syntax, duplicate keys, ...)
+# and switch off purely stylistic rules that would only produce noise on commented manifests.
+extends: default
+
+rules:
+  line-length: disable
+  document-start: disable
+  comments: disable
+  comments-indentation: disable
+  indentation: disable
+  empty-lines: disable
+  trailing-spaces: disable
+  new-line-at-end-of-file: disable

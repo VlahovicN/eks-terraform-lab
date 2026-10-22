@@ -22,10 +22,10 @@ module "eks" {
       before_compute              = true
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
+    }
   }
-}
   # Optional
-  endpoint_public_access = true  # Enables public access to the EKS API endpoint
+  endpoint_public_access = true # Enables public access to the EKS API endpoint
 
   authentication_mode = "API"
 
@@ -49,9 +49,9 @@ module "eks" {
 
       taints = {
         components = {
-            key    = "CriticalAddonsOnly"
-            value  = "true"
-            effect = "NO_SCHEDULE"
+          key    = "CriticalAddonsOnly"
+          value  = "true"
+          effect = "NO_SCHEDULE"
         }
       }
 
@@ -67,7 +67,7 @@ module "eks" {
 
 
   node_security_group_additional_rules = {
-# Rule: ingress_self_all (Node-to-Node Intra-Cluster Communication)
+    # Rule: ingress_self_all (Node-to-Node Intra-Cluster Communication)
     # -----------------------------------------------------------------------------------------
     # WHAT: Allows all inbound traffic (all ports and protocols) between the worker nodes themselves.
     # WHY: In Kubernetes, pods belonging to the same application stack (e.g., frontend and backend) 
@@ -81,7 +81,7 @@ module "eks" {
       type        = "ingress"
       self        = true
     }
-# Rule: egress_all (Outbound Internet and Network Access)
+    # Rule: egress_all (Outbound Internet and Network Access)
     # -----------------------------------------------------------------------------------------
     # WHAT: Allows unrestricted outbound traffic (all ports and protocols) from nodes to any destination.
     # WHY: Worker nodes must access the public internet and AWS endpoints to pull container images 
@@ -96,7 +96,7 @@ module "eks" {
       cidr_blocks      = ["0.0.0.0/0"]
       ipv6_cidr_blocks = ["::/0"]
     }
-# Rule: ingress_cluster_to_node_all_traffic (Control Plane to Worker Node Connection)
+    # Rule: ingress_cluster_to_node_all_traffic (Control Plane to Worker Node Connection)
     # -----------------------------------------------------------------------------------------
     # WHAT: Opens a direct connection from the EKS Control Plane to the worker nodes.
     # WHY: The EKS Control Plane needs to send commands and talk to the nodes constantly. 
@@ -114,9 +114,9 @@ module "eks" {
 
   }
 
-    node_security_group_tags = {
-        "karpenter.sh/discovery" = local.cluster_name
-    }
+  node_security_group_tags = {
+    "karpenter.sh/discovery" = local.cluster_name
+  }
 
 }
 
@@ -126,10 +126,10 @@ module "eks" {
 ################################################################
 
 resource "aws_eks_access_entry" "root_admin" {
-  cluster_name      = module.eks.cluster_name
-  principal_arn     = data.aws_caller_identity.current.arn
-  type              = "STANDARD"
-  
+  cluster_name  = module.eks.cluster_name
+  principal_arn = data.aws_caller_identity.current.arn
+  type          = "STANDARD"
+
   depends_on = [module.eks]
 }
 
@@ -227,7 +227,7 @@ resource "aws_iam_policy" "keda_operator_policy" {
           "sqs:ChangeMessageVisibility"
         ],
         Effect   = "Allow",
-        Resource = "*"  # Needs SQS only if using the SQS scaler, to check the number of messages in a queue so it knows how many application pods to scale up or down.
+        Resource = "*" # Needs SQS only if using the SQS scaler, to check the number of messages in a queue so it knows how many application pods to scale up or down.
       },
       {
         Action = [

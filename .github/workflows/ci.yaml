@@ -1,0 +1,45 @@
+name: CI
+
+# Static checks only: nothing here talks to AWS and no credentials/secrets are needed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform-eks-infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      # -backend=false: no remote state/AWS access needed, only providers and modules are downloaded
+      - run: terraform init -backend=false
+      - run: terraform validate
+      - uses: terraform-linters/setup-tflint@v4
+      # Only fail on errors; style warnings (untyped variable, unpinned module) are reported but do not fail the build
+      - run: tflint --minimum-failure-severity=error
+
+  yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install yamllint
+      - run: yamllint -c .yamllint.yaml argocd k8s-gitops-manifests
+
+  kubernetes-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar -xz
+      # Custom resources (NodePool, ScaledObject, Application, ...) have no schema here and are skipped,
+      # so effectively only the core Kubernetes objects (Deployment, PodDisruptionBudget, ...) are validated.
+      - run: ./kubeconform -strict -ignore-missing-schemas -summary k8s-gitops-manifests argocd

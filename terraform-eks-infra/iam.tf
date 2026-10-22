@@ -27,9 +27,9 @@ resource "aws_iam_policy" "eso_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "AllowReadParameterStoreLAB"
-        Effect   = "Allow"
-        Action   = [
+        Sid    = "AllowReadParameterStoreLAB"
+        Effect = "Allow"
+        Action = [
           "ssm:GetParameter",
           "ssm:GetParameters",
           "ssm:GetParametersByPath"

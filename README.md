@@ -6,6 +6,7 @@
 ![Karpenter](https://img.shields.io/badge/Karpenter-node_autoscaling-1F6FEB)
 ![KEDA](https://img.shields.io/badge/KEDA-pod_autoscaling-326CE5)
 ![License](https://img.shields.io/badge/License-MIT-green)
+[![CI](https://github.com/VlahovicN/eks-terraform-lab/actions/workflows/ci.yaml/badge.svg)](https://github.com/VlahovicN/eks-terraform-lab/actions/workflows/ci.yaml)
 
 A personal, hands-on AWS EKS lab that goes past the "deploy nginx" tutorial level and into the parts that actually break in practice: dual-axis autoscaling (pods via **KEDA**, nodes via **Karpenter**), GitOps delivery with **ArgoCD**, least-privilege AWS auth with **EKS Pod Identity**, cost guardrails, and the debugging that happens when documentation and reality disagree.
 
@@ -108,7 +109,11 @@ Inside `eks-lab-manifests` there are further waves: `ClusterSecretStore` and `EC
 
 ## Verified results
 
-Captured on a freshly bootstrapped cluster (`bootstrap.sh` from zero, then one `git push` of the KEDA Application):
+The ArgoCD UI after a fresh `bootstrap.sh`: the `root` Application and its five children, all `Synced` and `Healthy`.
+
+<!-- OVDE ZALEPITI: screenshot ArgoCD UI-ja (App-of-Apps stablo). Zameni ovaj komentar slikom, npr. ![ArgoCD App-of-Apps tree, all Synced and Healthy](url) -->
+
+The same state from the command line, captured on a freshly bootstrapped cluster:
 
 ```text
 $ kubectl get application -n argocd
