@@ -12,8 +12,8 @@ spec:
     chart: karpenter
     targetRevision: "1.12.1"
     helm:
-      # Mirrors helm/karpenter/values.yaml - kept inline since this is a remote
-      # (non-git) Helm source, ArgoCD can't read a valueFile from this repo.
+      # Values are inline because this is a remote (non-git) Helm source,
+      # so ArgoCD can't read a valueFile from this repo.
       values: |
         image:
           repository: public.ecr.aws/karpenter/controller

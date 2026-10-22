@@ -92,7 +92,6 @@ Inside `eks-lab-manifests` there are further waves: `ClusterSecretStore` and `EC
 | `k8s-gitops-manifests/eso/` | `ClusterSecretStore` + `ExternalSecret` pulling from SSM Parameter Store |
 | `k8s-gitops-manifests/app1/` | Static 3-replica deployment + PDB, consumes the ESO-managed secret |
 | `k8s-gitops-manifests/app2/` | KEDA-scaled deployment + `ScaledObject`/`TriggerAuthentication` + PDB |
-| `helm/` | Reference Helm values for ESO and Karpenter (the values actually used live inline in `argocd/apps/`) |
 | `bootstrap.sh` | End-to-end: `terraform apply`, kubeconfig, then applies the root `Application`; ArgoCD does the rest |
 
 ## Key design decisions
@@ -210,7 +209,6 @@ terraform -chdir=terraform-eks-infra destroy
 - The `app1`/`app2` containers are placeholder `alpine:latest` (`sleep infinity`). The point of this lab is the platform plumbing (autoscaling, secrets, IAM, GitOps), not application logic.
 - `k8s-gitops-manifests/app2/scaledobject-app2.yaml` has this lab's AWS account ID baked into the SQS queue URL. That's not a secret (account IDs show up in every ARN and CloudTrail entry regardless), just swap it for your own if you reuse this manifest.
 - `bootstrap.sh` has hardcoded absolute paths and an AWS profile name, and the ArgoCD `repoURL` points at the original repo (see "Running it").
-- Helm values for Karpenter and ESO exist twice: in `helm/` and inlined in `argocd/apps/`. A remote chart source cannot read a values file from this repo, and only the inlined copy is used.
 - The CRD-before-CR ordering relies on sync waves plus the custom `Application` health check. A failed automated sync is not retried for the same commit, so if something goes wrong on first bootstrap, a manual sync is needed.
 - The live "Karpenter scales to 3 nodes" test is code-complete but unverified end-to-end, pending the AWS quota increase described above.
 
