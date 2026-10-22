@@ -167,7 +167,7 @@ The most useful part of this repo isn't the happy path, it's what broke and how 
 | ArgoCD GitOps: App-of-Apps, sync waves, Karpenter + ESO + KEDA + apps | Done, verified end-to-end on a fresh cluster |
 | Live Karpenter multi-node scaling test (SQS burst to 9 pods, 3 nodes) | Blocked on AWS account vCPU quota (see above) |
 | Kustomize | Deliberately skipped, not a prerequisite for ArgoCD and low value for a single-cluster lab |
-| CI (`terraform fmt`/`validate`, `tflint`, manifest linting) | Planned |
+| CI (`terraform fmt`/`validate`, `tflint`, `yamllint`, `kubeconform`) | Done, runs on every push (GitHub Actions) |
 
 ## Running it
 
