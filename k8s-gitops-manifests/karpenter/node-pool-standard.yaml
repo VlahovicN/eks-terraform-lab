@@ -94,15 +94,15 @@ spec:
   # like rolling Nodes due to them hitting their maximum lifetime (expiry) or scaling down nodes to reduce cluster cost
   disruption:
     consolidationPolicy: WhenEmpty     # Only ever consolidate (remove) a node once it has zero non-daemonset pods left on it - never repacks/evicts pods that are still running just to shrink the pool
-    consolidateAfter: Never             # NOTE: "Never" disables the automatic empty-node consolidation timer entirely for this pool - a standard node stays up until it hits `expireAfter` (336h) or is deleted manually. Because of this, the budget window below (which only restricts Empty/Underutilized consolidation) has nothing to actually restrict on this particular pool - it's inherited from the priority pool's config for consistency, not actively doing work here.
+    consolidateAfter: 1m                # Once a node sits empty for 1 minute, Karpenter is allowed to remove it (same as the priority pool). The budget window below still decides WHEN that may happen: outside the Tuesday gap an empty node stays up
     budgets:
     - nodes: "20%"                      # Normally at most 20% of this pool's nodes may be disrupted (expired/rolled) at the same time - limits blast radius
-    # Consolidation window: block Empty/Underutilized consolidation all week EXCEPT Tue 07:00-09:00 UTC.
+    # Disruption window: block Empty consolidation and Drifted node replacement all week EXCEPT Tue 07:00-09:00 UTC.
     # Schedules are always UTC. 166h = 6d22h, so the block runs Tue 09:00 -> next Tue 07:00, leaving the
-    # Tue 07:00-09:00 gap as the only time the 20% budget above permits consolidation. Drift is unaffected.
+    # Tue 07:00-09:00 gap as the only time the 20% budget above permits these disruptions.
     - nodes: "0"                        # During its scheduled window, this budget overrides the one above: 0 nodes may be disrupted for the listed reasons
       schedule: "0 9 * * 2"              # Cron expression: every Tuesday at 09:00 UTC - start of the blocked window
       duration: 166h                     # Window lasts 166h (6 days 22h) - i.e. until next Tuesday 07:00 UTC
       reasons:
-      - Empty                            # This budget only restricts "Empty" disruptions (what consolidationPolicy: WhenEmpty would trigger, if consolidateAfter weren't "Never")...
-      - Underutilized                    # ...and "Underutilized" ones. "Drifted" is deliberately NOT listed, so drift-triggered node replacement is never blocked by this schedule
+      - Empty                            # This budget restricts "Empty" disruptions - i.e. it blocks the consolidateAfter: 1m behavior above during this window
+      - Drifted                          # ...and "Drifted" ones: a node that no longer matches its NodeClass (e.g. al2023@latest now resolves to a newer AMI) is replaced only inside the Tuesday gap, not at a random time. "Underutilized" is not listed because consolidationPolicy is WhenEmpty, so it never triggers
